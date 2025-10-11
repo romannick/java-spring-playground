@@ -1,0 +1,167 @@
+version: '3.9'
+
+services:
+  mysql-db:
+    image: mysql:8.0
+    container_name: mysql-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: playground
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app
+  gateway-service:
+    image: playground/gateway-service:latest
+    build:
+      context: .
+      dockerfile: gateway-service/Dockerfile
+    container_name: gateway-service
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER.PORT: 8080
+      SPRING_APPLICATION_NAME: gateway-service
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_R2DBC_URL: r2dbc:mysql://mysql-db:3306/playground
+      SERVICE_URL_USER: http://nginx:80/user-service/
+      SERVICE_URL_PRODUCT: http://nginx:80/product-service/
+    depends_on:
+      - mysql-db
+    networks:
+      - app
+  user-service-1:
+    image: playground/user-service:latest
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    container_name: user-service-1
+    environment:
+      SERVER.PORT: 8080
+      SPRING_APPLICATION_NAME: user-service-1
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_R2DBC_URL: r2dbc:mysql://mysql-db:3306/playground
+    depends_on:
+      - mysql-db
+    networks:
+      - app
+  user-service-2:
+    image: playground/user-service:latest
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    container_name: user-service-2
+    environment:
+      SERVER.PORT: 8080
+      SPRING_APPLICATION_NAME: user-service-2
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_R2DBC_URL: r2dbc:mysql://mysql-db:3306/playground
+    depends_on:
+      - mysql-db
+    networks:
+      - app
+  product-service-1:
+    image: playground/product-service:latest
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    container_name: product-service-1
+    environment:
+      SERVER.PORT: 8080
+      SPRING_APPLICATION_NAME: product-service-1
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_R2DBC_URL: r2dbc:mysql://mysql-db:3306/playground
+    depends_on:
+      - mysql-db
+    networks:
+      - app
+  product-service-2:
+    image: playground/product-service:latest
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    container_name: product-service-2
+    environment:
+      SERVER.PORT: 8080
+      SPRING_APPLICATION_NAME: product-service-2
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_R2DBC_URL: r2dbc:mysql://mysql-db:3306/playground
+    depends_on:
+      - mysql-db
+    networks:
+      - app
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker-volumes/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - gateway-service
+      - user-service-1
+      - user-service-2
+      - product-service-1
+      - product-service-2
+    networks:
+      - app
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./docker-volumes/prometheus/dev/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - app
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: "grafana-metricsdrilldown-app"
+    depends_on:
+      - prometheus
+    volumes:
+      - ./docker-volumes/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker-volumes/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - app
+  loki:
+    image: grafana/loki:2.9.2
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - app
+  promtail:
+    image: grafana/promtail:2.9.2
+    container_name: promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-volumes/prometheus/dev/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - app
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: jaeger
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "14268:14268"   # HTTP collector endpoint
+      - "6831:6831/udp" # UDP for agent (optional)
+      - "6832:6832/udp"
+    networks:
+      - app
+volumes:
+  mysql_data:
+networks:
+  app:
